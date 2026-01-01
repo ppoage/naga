@@ -463,6 +463,14 @@ func (w *Writer) writeFunctionArgument(arg ir.ExprFunctionArgument) error {
 // writeGlobalVariable writes a global variable reference.
 func (w *Writer) writeGlobalVariable(global ir.ExprGlobalVariable) error {
 	name := w.getName(nameKey{kind: nameKeyGlobalVariable, handle1: uint32(global.Variable)})
+	if int(global.Variable) < len(w.module.GlobalVariables) {
+		space := w.module.GlobalVariables[global.Variable].Space
+		switch space {
+		case ir.SpaceUniform, ir.SpaceStorage, ir.SpacePushConstant:
+			w.write("(*%s)", name)
+			return nil
+		}
+	}
 	w.write("%s", name)
 	return nil
 }

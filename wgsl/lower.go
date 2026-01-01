@@ -140,6 +140,9 @@ func (l *Lowerer) registerBuiltinTypes() {
 	l.registerType("i32", ir.ScalarType{Kind: ir.ScalarSint, Width: 4})
 	l.registerType("u32", ir.ScalarType{Kind: ir.ScalarUint, Width: 4})
 	l.registerType("bool", ir.ScalarType{Kind: ir.ScalarBool, Width: 1})
+	// Samplers
+	l.registerType("sampler", ir.SamplerType{Comparison: false})
+	l.registerType("sampler_comparison", ir.SamplerType{Comparison: true})
 }
 
 // registerType adds a type to the registry with deduplication and maps its name.
@@ -155,6 +158,13 @@ func (l *Lowerer) registerType(name string, inner ir.TypeInner) ir.TypeHandle {
 	l.module.Types = l.registry.GetTypes()
 
 	return handle
+}
+
+func (l *Lowerer) typeByHandle(handle ir.TypeHandle) (ir.Type, bool) {
+	if int(handle) >= len(l.module.Types) {
+		return ir.Type{}, false
+	}
+	return l.module.Types[handle], true
 }
 
 // lowerStruct converts a struct declaration to IR.
@@ -950,7 +960,7 @@ func (l *Lowerer) resolveParameterizedType(t *NamedType) (ir.TypeHandle, error) 
 			return 0, err
 		}
 		// Get scalar from registry
-		typ, ok := l.registry.Lookup(scalarType)
+		typ, ok := l.typeByHandle(scalarType)
 		if !ok {
 			return 0, fmt.Errorf("scalar type handle %d not found in registry", scalarType)
 		}
@@ -971,7 +981,7 @@ func (l *Lowerer) resolveParameterizedType(t *NamedType) (ir.TypeHandle, error) 
 			return 0, err
 		}
 		// Get scalar from registry
-		typ, ok := l.registry.Lookup(scalarType)
+		typ, ok := l.typeByHandle(scalarType)
 		if !ok {
 			return 0, fmt.Errorf("scalar type handle %d not found in registry", scalarType)
 		}
@@ -985,11 +995,10 @@ func (l *Lowerer) resolveParameterizedType(t *NamedType) (ir.TypeHandle, error) 
 
 	// Texture types: texture_2d<f32>
 	if len(t.Name) >= 7 && t.Name[:7] == "texture" {
-		dim := l.textureDim(t.Name)
-		return l.registerType("", ir.ImageType{
-			Dim:   dim,
-			Class: ir.ImageClassSampled,
-		}), nil
+		if tex, ok := l.textureType(t.Name); ok {
+			return l.registerType("", tex), nil
+		}
+		return 0, fmt.Errorf("unsupported texture type: %s", t.Name)
 	}
 
 	// Atomic types: atomic<u32>, atomic<i32>
@@ -1001,7 +1010,7 @@ func (l *Lowerer) resolveParameterizedType(t *NamedType) (ir.TypeHandle, error) 
 		if err != nil {
 			return 0, err
 		}
-		typ, ok := l.registry.Lookup(scalarType)
+		typ, ok := l.typeByHandle(scalarType)
 		if !ok {
 			return 0, fmt.Errorf("scalar type handle %d not found in registry", scalarType)
 		}
@@ -1256,6 +1265,45 @@ func (l *Lowerer) textureDim(name string) ir.ImageDimension {
 	return ir.Dim2D // Default
 }
 
+func (l *Lowerer) textureType(name string) (ir.ImageType, bool) {
+	switch name {
+	case "texture_1d":
+		return ir.ImageType{Dim: ir.Dim1D, Class: ir.ImageClassSampled}, true
+	case "texture_2d":
+		return ir.ImageType{Dim: ir.Dim2D, Class: ir.ImageClassSampled}, true
+	case "texture_2d_array":
+		return ir.ImageType{Dim: ir.Dim2D, Arrayed: true, Class: ir.ImageClassSampled}, true
+	case "texture_3d":
+		return ir.ImageType{Dim: ir.Dim3D, Class: ir.ImageClassSampled}, true
+	case "texture_cube":
+		return ir.ImageType{Dim: ir.DimCube, Class: ir.ImageClassSampled}, true
+	case "texture_cube_array":
+		return ir.ImageType{Dim: ir.DimCube, Arrayed: true, Class: ir.ImageClassSampled}, true
+	case "texture_multisampled_2d":
+		return ir.ImageType{Dim: ir.Dim2D, Multisampled: true, Class: ir.ImageClassSampled}, true
+	case "texture_depth_2d":
+		return ir.ImageType{Dim: ir.Dim2D, Class: ir.ImageClassDepth}, true
+	case "texture_depth_2d_array":
+		return ir.ImageType{Dim: ir.Dim2D, Arrayed: true, Class: ir.ImageClassDepth}, true
+	case "texture_depth_cube":
+		return ir.ImageType{Dim: ir.DimCube, Class: ir.ImageClassDepth}, true
+	case "texture_depth_cube_array":
+		return ir.ImageType{Dim: ir.DimCube, Arrayed: true, Class: ir.ImageClassDepth}, true
+	case "texture_depth_multisampled_2d":
+		return ir.ImageType{Dim: ir.Dim2D, Multisampled: true, Class: ir.ImageClassDepth}, true
+	case "texture_storage_1d":
+		return ir.ImageType{Dim: ir.Dim1D, Class: ir.ImageClassStorage}, true
+	case "texture_storage_2d":
+		return ir.ImageType{Dim: ir.Dim2D, Class: ir.ImageClassStorage}, true
+	case "texture_storage_2d_array":
+		return ir.ImageType{Dim: ir.Dim2D, Arrayed: true, Class: ir.ImageClassStorage}, true
+	case "texture_storage_3d":
+		return ir.ImageType{Dim: ir.Dim3D, Class: ir.ImageClassStorage}, true
+	default:
+		return ir.ImageType{}, false
+	}
+}
+
 func (l *Lowerer) tokenToBinaryOp(tok TokenKind) ir.BinaryOperator {
 	ops := map[TokenKind]ir.BinaryOperator{
 		TokenPlus:           ir.BinaryAdd,
@@ -1378,10 +1426,10 @@ func (l *Lowerer) vectorType(base ir.TypeResolution) (ir.VectorType, bool, error
 func (l *Lowerer) resolveTypeInner(base ir.TypeResolution) (ir.TypeInner, *ir.TypeHandle, error) {
 	if base.Handle != nil {
 		handle := *base.Handle
-		if typ, ok := l.registry.Lookup(handle); ok {
+		if typ, ok := l.typeByHandle(handle); ok {
 			inner := typ.Inner
 			if pt, ok := inner.(ir.PointerType); ok {
-				if baseType, ok := l.registry.Lookup(pt.Base); ok {
+				if baseType, ok := l.typeByHandle(pt.Base); ok {
 					handle = pt.Base
 					inner = baseType.Inner
 				} else {
@@ -1395,7 +1443,7 @@ func (l *Lowerer) resolveTypeInner(base ir.TypeResolution) (ir.TypeInner, *ir.Ty
 	if base.Value != nil {
 		inner := base.Value
 		if pt, ok := inner.(ir.PointerType); ok {
-			if baseType, ok := l.registry.Lookup(pt.Base); ok {
+			if baseType, ok := l.typeByHandle(pt.Base); ok {
 				inner = baseType.Inner
 				handle := pt.Base
 				return inner, &handle, nil

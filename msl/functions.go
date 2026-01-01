@@ -318,8 +318,8 @@ func (w *Writer) writeEntryPointInputStruct(epIdx int, ep *ir.EntryPoint, fn *ir
 	}
 
 	if !hasLocationInputs {
-		// Handle fragment stage struct inputs without explicit bindings.
-		if ep.Stage == ir.StageFragment {
+		// Handle stage input structs without explicit bindings.
+		if ep.Stage == ir.StageFragment || ep.Stage == ir.StageVertex {
 			for i, arg := range fn.Arguments {
 				if arg.Binding != nil {
 					continue
@@ -343,9 +343,14 @@ func (w *Writer) writeEntryPointInputStruct(epIdx int, ep *ir.EntryPoint, fn *ir
 					memberName := w.getName(nameKey{kind: nameKeyStructMember, handle1: uint32(arg.Type), handle2: uint32(memberIdx)}) //nolint:gosec // G115: memberIdx is valid slice index
 					memberType := w.writeTypeName(member.Type, StorageAccess(0))
 
-					attr := attrPosition
-					if memberIdx > 0 {
-						attr = fmt.Sprintf("[[user(locn%d)]]", memberIdx-1)
+					var attr string
+					if ep.Stage == ir.StageVertex {
+						attr = fmt.Sprintf("[[attribute(%d)]]", memberIdx)
+					} else {
+						attr = attrPosition
+						if memberIdx > 0 {
+							attr = fmt.Sprintf("[[user(locn%d)]]", memberIdx-1)
+						}
 					}
 
 					w.writeLine("%s %s %s;", memberType, memberName, attr)
