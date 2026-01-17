@@ -101,3 +101,32 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
 	}
 	verifyMSLWithXcrun(t, mslSource)
 }
+
+func TestMSLCompilesWithXcrun_RuntimeStorageArray(t *testing.T) {
+	const wgslSource = `
+@group(0) @binding(0) var<storage, read_write> data: array<u32>;
+
+@compute @workgroup_size(1)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+	if (id.x < 4u) {
+		data[id.x] = id.x;
+	}
+}
+`
+
+	ast, err := naga.Parse(wgslSource)
+	if err != nil {
+		t.Fatalf("naga.Parse failed: %v", err)
+	}
+
+	module, err := naga.LowerWithSource(ast, wgslSource)
+	if err != nil {
+		t.Fatalf("naga.LowerWithSource failed: %v", err)
+	}
+
+	mslSource, _, err := Compile(module, DefaultOptions())
+	if err != nil {
+		t.Fatalf("msl.Compile failed: %v", err)
+	}
+	verifyMSLWithXcrun(t, mslSource)
+}

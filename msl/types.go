@@ -116,6 +116,9 @@ func (w *Writer) writeTypeInnerName(handle ir.TypeHandle, inner ir.TypeInner, ac
 		return matrixTypeName(t)
 
 	case ir.ArrayType:
+		if t.Size.Constant == nil {
+			return w.inlineArrayTypeName(t)
+		}
 		// Check if we have a wrapper struct
 		if wrapperName, ok := w.arrayWrappers[handle]; ok {
 			return wrapperName

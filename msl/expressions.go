@@ -253,6 +253,17 @@ func (w *Writer) writeAccess(access ir.ExprAccess) error {
 	baseType := w.getExpressionType(access.Base)
 	if baseType != nil {
 		if pt, ok := baseType.(ir.PointerType); ok {
+			if arr, ok := w.module.Types[pt.Base].Inner.(ir.ArrayType); ok && arr.Size.Constant == nil {
+				if err := w.writeExpression(access.Base); err != nil {
+					return err
+				}
+				w.write("[")
+				if err := w.writeExpression(access.Index); err != nil {
+					return err
+				}
+				w.write("]")
+				return nil
+			}
 			if _, ok := w.arrayWrappers[pt.Base]; ok {
 				if w.pointerNeedsDeref(pt) {
 					w.write("(*")
@@ -325,6 +336,13 @@ func (w *Writer) writeAccessIndex(access ir.ExprAccessIndex) error {
 	baseType := w.getExpressionType(access.Base)
 	if baseType != nil {
 		if pt, ok := baseType.(ir.PointerType); ok {
+			if arr, ok := w.module.Types[pt.Base].Inner.(ir.ArrayType); ok && arr.Size.Constant == nil {
+				if err := w.writeExpression(access.Base); err != nil {
+					return err
+				}
+				w.write("[%d]", access.Index)
+				return nil
+			}
 			if _, ok := w.arrayWrappers[pt.Base]; ok {
 				if w.pointerNeedsDeref(pt) {
 					w.write("(*")
@@ -467,6 +485,12 @@ func (w *Writer) writeGlobalVariable(global ir.ExprGlobalVariable) error {
 		space := w.module.GlobalVariables[global.Variable].Space
 		switch space {
 		case ir.SpaceUniform, ir.SpaceStorage, ir.SpacePushConstant:
+			if int(w.module.GlobalVariables[global.Variable].Type) < len(w.module.Types) {
+				if arr, ok := w.module.Types[w.module.GlobalVariables[global.Variable].Type].Inner.(ir.ArrayType); ok && arr.Size.Constant == nil {
+					w.write("%s", name)
+					return nil
+				}
+			}
 			w.write("(*%s)", name)
 			return nil
 		}
